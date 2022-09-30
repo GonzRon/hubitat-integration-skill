@@ -198,10 +198,9 @@ class LCSHubitatIntegration(MycroftSkill):
     def is_command_available(self, device, command):
         # Complain if the specified attribute is not one in the Hubitat maker app.
         self.log.debug("In is_command_available with device=" + str(device) + ' and command: ' + str(command))
-        for real_dev in self.dev_commands_dict:
-            if device.find(real_dev) >= 0 and command in self.dev_commands_dict[real_dev]:
-                self.log.debug("command is available")
-                return True
+        if self.dev_commands_dict[device] and command in self.dev_commands_dict[device]:
+            self.log.debug("command is available")
+            return True
         self.speak_dialog('command.not.supported', data={'device': device, 'command': command})
         return False
 
