@@ -14,6 +14,7 @@ class LCSHubitatIntegration(MycroftSkill):
         super().__init__()
         self.configured = False
         self.dev_commands_dict = None
+        self.dev_capabilities_dict = dict()
         self.address = None
         self.attr_dict = None
         self.min_fuzz = None
@@ -107,21 +108,19 @@ class LCSHubitatIntegration(MycroftSkill):
                 return
             level = message.data.get('level')
 
-            if capabilities := self.hub_get_attribute(self.hub_get_device_id(device), "capabilities"):
-                capabilities = [s.strip() for s in capabilities.strip('[]').split(',')]
-                if 'thermostat' in capabilities:
-                    if supported_modes := self.hub_get_attribute(self.hub_get_device_id(device), "supportedThermostatModes"):
-                        supported_modes = [s.strip() for s in supported_modes.strip('[]').split(',')]
-                        self.log.debug("Set Level Supported Modes: " + str(supported_modes))
-                        self.log.debug("Level is: " + str(level))
-                        if level in supported_modes and self.is_command_available(command='setThermostatMode', device=device):
-                            self.hub_command_devices(self.hub_get_device_id(device), "setThermostatMode", level)
-                            self.speak_dialog(str(device) + ' set to ' + str(level), data={'device': device, 'level': level})
-                            return
-                elif self.is_command_available(command='setLevel', device=device):
-                    self.hub_command_devices(self.hub_get_device_id(device), "setLevel", level)
-                    self.speak_dialog('ok', data={'device': device})
-                    return
+            if self.is_device_capable(device, 'Thermostat'):
+                if supported_modes := self.hub_get_attribute(self.hub_get_device_id(device), "supportedThermostatModes"):
+                    supported_modes = [s.strip() for s in supported_modes.strip('[]').split(',')]
+                    self.log.debug("Set Level Supported Modes: " + str(supported_modes))
+                    self.log.debug("Level is: " + str(level))
+                    if level in supported_modes and self.is_command_available(command='setThermostatMode', device=device):
+                        self.hub_command_devices(self.hub_get_device_id(device), "setThermostatMode", level)
+                        self.speak_dialog(str(device) + ' set to ' + str(level), data={'device': device, 'level': level})
+                        return
+            elif self.is_command_available(command='setLevel', device=device):
+                self.hub_command_devices(self.hub_get_device_id(device), "setLevel", level)
+                self.speak_dialog('ok', data={'device': device})
+                return
             raise Exception("Unsupported Device")
         else:
             self.not_configured()
@@ -202,6 +201,14 @@ class LCSHubitatIntegration(MycroftSkill):
             if device.find(real_dev) >= 0 and command in self.dev_commands_dict[real_dev]:
                 return True
         self.speak_dialog('command.not.supported', data={'device': device, 'command': command})
+        return False
+
+    def is_device_capable(self, device, capability):
+        # Complain if the specified attribute is not one in the Hubitat maker app.
+        for real_dev in self.dev_capabilities_dict:
+            if device.find(real_dev) >= 0 and capability in self.dev_capabilities_dict[real_dev]:
+                return True
+        self.speak_dialog('device ' + str(device) + ' is not a ' + str(capability), data={'device': device, 'capability': capability})
         return False
 
     def get_hub_device_name(self, message):
@@ -318,7 +325,7 @@ class LCSHubitatIntegration(MycroftSkill):
                         self.log.debug("Found Attribute Match: " + str(ret_attr['currentValue']))
                         return ret_attr['currentValue']
         return None
-    
+
     def update_devices(self):
         json_data = None
         this_label = None
@@ -350,12 +357,18 @@ class LCSHubitatIntegration(MycroftSkill):
                 elif k == 'label':
                     this_label = v
                     self.dev_commands_dict[this_label] = []
+                    self.dev_capabilities_dict[this_label] = []
                 elif k == 'commands':
                     self.log.debug("Commands for " + this_label + " is=>" + str(v))
                     for cmd in v:
                         self.dev_commands_dict[this_label].append(cmd['command'])
+                elif k == 'capabilities':
+                    self.log.debug("capabilities for " + this_label + " is=>" + str(v))
+                    for capability in v:
+                        self.dev_capabilities_dict[this_label].append(capability['capability'])
             self.dev_id_dict[this_label] = this_id
             self.log.debug(self.dev_commands_dict[this_label])
+            self.log.debug(self.dev_capabilities_dict[this_label])
             count = count + 1
         self.name_dict_present = True
         return count
