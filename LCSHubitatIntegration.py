@@ -209,7 +209,6 @@ class LCSHubitatIntegration(MycroftSkill):
         if capability in self.dev_capabilities_dict[device]:
             self.log.debug("device is capable")
             return True
-        self.speak_dialog('device ' + str(device) + ' is not a ' + str(capability), data={'device': device, 'capability': capability})
         return False
 
     def get_hub_device_name(self, message):
