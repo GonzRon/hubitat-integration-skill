@@ -112,7 +112,7 @@ class LCSHubitatIntegration(MycroftSkill):
             if level in supported_modes:
                 if self.is_command_available(command='setThermostatMode', device=device):
                     self.hub_command_devices(self.hub_get_device_id(device), "setThermostatMode", level)
-                    self.speak_dialog(str(device) + 'set to' + str(level), data={'device': device, 'level': level})
+                    self.speak_dialog(str(device) + ' set to ' + str(level), data={'device': device, 'level': level})
                 else:
                     self.not_configured()
             elif self.is_command_available(command='setLevel', device=device):
