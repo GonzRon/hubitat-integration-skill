@@ -205,12 +205,10 @@ class LCSHubitatIntegration(MycroftSkill):
         return False
 
     def is_device_capable(self, device, capability):
-        self.log.debug("In is_device_capable with device=" + str(device))
-        # Complain if the specified attribute is not one in the Hubitat maker app.
-        for real_dev in self.dev_capabilities_dict:
-            if device.find(real_dev) >= 0 and capability in self.dev_capabilities_dict[real_dev]:
-                self.log.debug("device is capable")
-                return True
+        self.log.debug("In is_device_capable with device=" + str(device) + ' searching for capability: ' + str(capability))
+        if capability in self.dev_capabilities_dict[device]:
+            self.log.debug("device is capable")
+            return True
         self.speak_dialog('device ' + str(device) + ' is not a ' + str(capability), data={'device': device, 'capability': capability})
         return False
 
