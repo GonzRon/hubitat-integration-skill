@@ -197,9 +197,10 @@ class LCSHubitatIntegration(MycroftSkill):
 
     def is_command_available(self, device, command):
         # Complain if the specified attribute is not one in the Hubitat maker app.
-        self.log.debug("In is_command_available with device=" + str(device))
+        self.log.debug("In is_command_available with device=" + str(device) + ' and command: ' + str(command))
         for real_dev in self.dev_commands_dict:
             if device.find(real_dev) >= 0 and command in self.dev_commands_dict[real_dev]:
+                self.log.debug("command is available")
                 return True
         self.speak_dialog('command.not.supported', data={'device': device, 'command': command})
         return False
@@ -358,14 +359,14 @@ class LCSHubitatIntegration(MycroftSkill):
                 elif k == 'label':
                     this_label = v
                     self.dev_commands_dict[this_label] = []
-                    self.dev_capabilities_dict[this_label] = []
+                    self.dev_capabilities_dict[this_label] = None
                 elif k == 'commands':
                     self.log.debug("Commands for " + this_label + " is=>" + str(v))
                     for cmd in v:
                         self.dev_commands_dict[this_label].append(cmd['command'])
                 elif k == 'capabilities':
                     self.log.debug("capabilities for " + this_label + " is=>" + str(v))
-                    self.dev_capabilities_dict[this_label].append(v)
+                    self.dev_capabilities_dict[this_label] = v
             self.dev_id_dict[this_label] = this_id
             self.log.debug(self.dev_commands_dict[this_label])
             self.log.debug(self.dev_capabilities_dict[this_label])
