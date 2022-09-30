@@ -1,3 +1,5 @@
+from typing import Dict
+
 from mycroft import MycroftSkill, intent_file_handler
 from fuzzywuzzy import fuzz
 import requests
@@ -103,23 +105,24 @@ class LCSHubitatIntegration(MycroftSkill):
             except:
                 # g_h_d_n speaks a dialog before throwing anerror
                 return
-
             level = message.data.get('level')
-            supported_modes = [s.strip() for s in self.hub_get_attribute(self.hub_get_device_id(device), "supportedThermostatModes").strip('[]').split(',')]
-            self.log.debug("Set Level Supported Modes: " + str(supported_modes))
-            self.log.debug("Level is: " + str(level))
 
-            if level in supported_modes:
-                if self.is_command_available(command='setThermostatMode', device=device):
-                    self.hub_command_devices(self.hub_get_device_id(device), "setThermostatMode", level)
-                    self.speak_dialog(str(device) + ' set to ' + str(level), data={'device': device, 'level': level})
-                else:
-                    raise Exception("Unsupported Device")
-            elif self.is_command_available(command='setLevel', device=device):
-                self.hub_command_devices(self.hub_get_device_id(device), "setLevel", level)
-                self.speak_dialog('ok', data={'device': device})
-            else:
-                raise Exception("Unsupported Device")
+            if capabilities := self.hub_get_attribute(self.hub_get_device_id(device), "capabilities"):
+                capabilities = [s.strip() for s in capabilities.strip('[]').split(',')]
+                if 'thermostat' in capabilities:
+                    if supported_modes := self.hub_get_attribute(self.hub_get_device_id(device), "supportedThermostatModes"):
+                        supported_modes = [s.strip() for s in supported_modes.strip('[]').split(',')]
+                        self.log.debug("Set Level Supported Modes: " + str(supported_modes))
+                        self.log.debug("Level is: " + str(level))
+                        if level in supported_modes and self.is_command_available(command='setThermostatMode', device=device):
+                            self.hub_command_devices(self.hub_get_device_id(device), "setThermostatMode", level)
+                            self.speak_dialog(str(device) + ' set to ' + str(level), data={'device': device, 'level': level})
+                            return
+                elif self.is_command_available(command='setLevel', device=device):
+                    self.hub_command_devices(self.hub_get_device_id(device), "setLevel", level)
+                    self.speak_dialog('ok', data={'device': device})
+                    return
+            raise Exception("Unsupported Device")
         else:
             self.not_configured()
 
@@ -288,7 +291,7 @@ class LCSHubitatIntegration(MycroftSkill):
         self.log.debug("URL for switching device " + url)
         self.access_hubitat(url)
 
-    def hub_get_attribute(self, dev_id, attr):
+    def hub_get_attribute(self, dev_id, attr) -> str:
         self.log.debug("Looking for attr {}".format(attr))
         # The json string from Hubitat turns into a dict.  The key attributes
         # has a value of a list.  The list is a list of dicts with the attribute
@@ -309,6 +312,7 @@ class LCSHubitatIntegration(MycroftSkill):
 
         for info in jsn:
             if info == "attributes":
+                ret_attr: dict[str, str | int]
                 for ret_attr in jsn[info]:
                     if ret_attr['name'] == attr:
                         self.log.debug("Found Attribute Match: " + str(ret_attr['currentValue']))
