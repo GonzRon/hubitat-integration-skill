@@ -6,9 +6,6 @@ import socket
 
 __author__ = "GonzRon"
 
-import pydevd_pycharm
-pydevd_pycharm.settrace('icesword-nvme', port=55555, stdoutToServer=True, stderrToServer=True, suspend=False)
-
 
 class LCSHubitatIntegration(MycroftSkill):
     def __init__(self):
