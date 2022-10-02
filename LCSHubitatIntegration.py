@@ -1,5 +1,3 @@
-from typing import Dict
-
 from mycroft import MycroftSkill, intent_file_handler
 from fuzzywuzzy import fuzz
 import requests
@@ -12,6 +10,7 @@ __author__ = "GonzRon"
 class LCSHubitatIntegration(MycroftSkill):
     def __init__(self):
         super().__init__()
+        self.all_devices_dict = dict()
         self.configured = False
         self.dev_commands_dict = None
         self.dev_capabilities_dict = dict()
@@ -28,7 +27,7 @@ class LCSHubitatIntegration(MycroftSkill):
         # This dict will hold the device name and its hubitat id number
         self.dev_id_dict = {}
         self.name_dict_present = False
-        # Get a few settings from the Mycroft web site (they are specific to the user site) and
+        # Get a few settings from the Mycroft website (they are specific to the user site) and
         # get the current values
         self.settings_change_callback = self.on_settings_changed
         self.on_settings_changed()
@@ -103,13 +102,14 @@ class LCSHubitatIntegration(MycroftSkill):
             # For utterances like "set the xxx to yyy%"
             try:
                 device = self.get_hub_device_name(message)
-            except:
-                # g_h_d_n speaks a dialog before throwing anerror
+            except NameError:
+                # g_h_d_n speaks a dialog before throwing an error
                 return
             level = message.data.get('level')
 
+            dev_id = self.dev_id_dict[device]
             if self.is_device_capable(device, 'Thermostat'):
-                if supported_modes := self.hub_get_attribute(self.hub_get_device_id(device), "supportedThermostatModes"):
+                if supported_modes := self.get_device_attribute(dev_id, "supportedThermostatModes"):
                     supported_modes = [s.strip() for s in supported_modes.strip('[]').split(',')]
                     self.log.debug("Set Level Supported Modes: " + str(supported_modes))
                     self.log.debug("Level is: " + str(level))
@@ -117,13 +117,29 @@ class LCSHubitatIntegration(MycroftSkill):
                         self.hub_command_devices(self.hub_get_device_id(device), "setThermostatMode", level)
                         self.speak_dialog(str(device) + ' set to ' + str(level), data={'device': device, 'level': level})
                         return
+                    else:
+                        try:
+                            val = int(level)
+                        except ValueError:
+                            raise Exception("Unsupported Value")
+                        else:
+                            t_stat_mode = self.get_device_attribute(dev_id, "thermostatMode")
+                            if 'cool' in t_stat_mode:
+                                self.call_set_level(device, level, "setCoolingSetpoint")
+                            elif 'heat' in t_stat_mode:
+                                self.call_set_level(device, level, "setHeatingSetpoint")
+                            else:
+                                raise Exception("Unsupported Device Mode")
             elif self.is_command_available(command='setLevel', device=device):
-                self.hub_command_devices(self.hub_get_device_id(device), "setLevel", level)
-                self.speak_dialog('ok', data={'device': device})
-                return
+                self.call_set_level(device, level)
             raise Exception("Unsupported Device")
         else:
             self.not_configured()
+
+    def call_set_level(self, device, level, mode='setLevel'):
+        if self.is_command_available(command=mode, device=device):
+            self.hub_command_devices(self.hub_get_device_id(device), mode, level)
+            self.speak_dialog('ok', data={'device': device})
 
     @intent_file_handler('attr.intent')
     def handle_attr_intent(self, message):
@@ -140,7 +156,7 @@ class LCSHubitatIntegration(MycroftSkill):
                 device = self.get_hub_device_name_from_text(self.attr_dict[attr])
 
             self.log.debug("Found attribute={},device={}".format(attr, device))
-            val = self.hub_get_attribute(self.hub_get_device_id(device), attr)
+            val = self.get_device_attribute(self.hub_get_device_id(device), attr)
             if val is None:
                 self.speak_dialog('attr.not.supported', data={'device': device, 'attr': attr})
             else:
@@ -151,9 +167,9 @@ class LCSHubitatIntegration(MycroftSkill):
     @intent_file_handler('rescan.intent')
     def handle_rescan_intent(self, message):
         if self.configured:
-            count = self.update_devices()
-            self.log.info(str(count))
-            self.speak_dialog('rescan', data={'count': count})
+            device_count = len(self.dev_id_dict)
+            self.log.info(str(device_count))
+            self.speak_dialog('rescan', data={'count': device_count})
         else:
             self.not_configured()
 
@@ -163,13 +179,11 @@ class LCSHubitatIntegration(MycroftSkill):
             if not self.name_dict_present:
                 self.update_devices()
             number = 0
-            for hubDev in self.dev_id_dict:
-                ident = self.dev_id_dict[hubDev]
-
+            for label, dev_id in self.dev_id_dict.items():
                 # Speak the real devices, but not the test devices
-                if ident[0:6] != '**test':
-                    number = number + 1
-                    self.speak_dialog('list.devices', data={'number': str(number), 'name': hubDev, 'id': ident})
+                if '**test' not in dev_id:
+                    number += 1
+                    self.speak_dialog('list.devices', data={'number': str(number), 'name': label, 'id': dev_id})
         else:
             self.not_configured()
 
@@ -182,7 +196,7 @@ class LCSHubitatIntegration(MycroftSkill):
             self.log.debug("In on/off intent with command " + cmd)
             device = self.get_hub_device_name(message)
             silence = message.data.get('how')
-        except:
+        except NameError:
             # get_hub_device_name speaks the error dialog
             return
 
@@ -191,22 +205,26 @@ class LCSHubitatIntegration(MycroftSkill):
                 self.hub_command_devices(self.hub_get_device_id(device), cmd)
                 if silence is None:
                     self.speak_dialog('ok', data={'device': device})
-            except:
+            except requests.RequestException:
                 # If command devices throws an error, probably a bad URL
                 self.speak_dialog('url.error')
 
     def is_command_available(self, device, command):
         # Complain if the specified attribute is not one in the Hubitat maker app.
         self.log.debug("In is_command_available with device=" + str(device) + ' and command: ' + str(command))
-        if self.dev_commands_dict[device] and command in self.dev_commands_dict[device]:
+        device_id = self.dev_id_dict['device']
+
+        if command in self.all_devices_dict[device_id]['commands']:
             self.log.debug("command is available")
             return True
+
         self.speak_dialog('command.not.supported', data={'device': device, 'command': command})
         return False
 
     def is_device_capable(self, device, capability):
         self.log.debug("In is_device_capable with device=" + str(device) + ' searching for capability: ' + str(capability))
-        if capability in self.dev_capabilities_dict[device]:
+        device_id = self.dev_id_dict[device]
+        if capability in self.all_devices_dict[device_id]['capabilities']:
             self.log.debug("device is capable")
             return True
         return False
@@ -225,7 +243,7 @@ class LCSHubitatIntegration(MycroftSkill):
 
     def get_hub_device_name_from_text(self, text):
         # Look for a device name in the list of Hubitat devices.
-        # The text may have something a bit different than the real name like "the light" or "lights" rather
+        # The text may have something a bit different from the real name like "the light" or "lights" rather
         # than the actual Hubitat name of light.  This finds the actual Hubitat name using 'fuzzy-wuzzy' and
         # the match score specified as a setting by the user
         if not self.name_dict_present:
@@ -252,18 +270,8 @@ class LCSHubitatIntegration(MycroftSkill):
         self.speak_dialog('device.not.supported', data={'device': text})
         raise Exception("Unsupported Device")
 
-    def hub_get_device_id(self, device):
-        # devIds is a dict with the device name from hubitat as the key, and the ID number as the value.
-        # This returns the ID number to send to hubitat
-        for hub_dev in self.dev_id_dict:
-            # self.log.debug("hubDev:"+hubDev+" device="+device)
-            if device.find(hub_dev) >= 0:
-                hubId = self.dev_id_dict[hub_dev]
-                self.log.debug("Found device I said: " + hub_dev + " ID=" + hubId)
-                return hubId
-
     def hub_get_attr_name(self, name):
-        # This is why we need a list of possible attributes.  Otherwise we could not do a fuzzy search.
+        # This is why we need a list of possible attributes, as otherwise we could not do a fuzzy search.
         best_name = None
         best_score = self.min_fuzz
         self.log.debug(self.attr_dict)
@@ -296,9 +304,12 @@ class LCSHubitatIntegration(MycroftSkill):
         if value:
             url = url + "/" + value
         self.log.debug("URL for switching device " + url)
-        self.access_hubitat(url)
+        try:
+            self.access_hubitat(url)
+        except requests.RequestException as e:
+            raise e
 
-    def hub_get_attribute(self, dev_id, attr) -> str:
+    def get_device_attribute(self, dev_id, attr):
         self.log.debug("Looking for attr {}".format(attr))
         # The json string from Hubitat turns into a dict.  The key attributes
         # has a value of a list.  The list is a list of dicts with the attribute
@@ -308,28 +319,14 @@ class LCSHubitatIntegration(MycroftSkill):
             tempList = [{'name': "testattr", "currentValue": 99}]
             jsn = {"attributes": tempList}
             x = jsn["attributes"]
-        else:
-            # Here we get the real json string from hubitat
-            url = "/apps/api/" + self.maker_api_app_id + "/devices/" + dev_id
-            retVal = self.access_hubitat(url)
-            jsn = json.loads(retVal)
-            self.log.debug(jsn)
-        # Now we have a nested set of dicts and lists as described above, either a simple
-        # one for test or the real (and more complex) one for a real Hubitat
 
-        for info in jsn:
-            if info == "attributes":
-                ret_attr: dict[str, str | int]
-                for ret_attr in jsn[info]:
-                    if ret_attr['name'] == attr:
-                        self.log.debug("Found Attribute Match: " + str(ret_attr['currentValue']))
-                        return ret_attr['currentValue']
-        return None
+        try:
+            return self.all_devices_dict[dev_id]['attributes'][attr]
+        except KeyError:
+            self.log.debug("Attribute not found")
+            return None
 
     def update_devices(self):
-        json_data = None
-        this_label = None
-        this_id = None
         # Init the device list and command list with tests
         self.dev_commands_dict = {"testOnDev": ["on"], "testOnOffDev": ["on", "off"],
                                   "testLevelDev": ["on", "off", "setLevel"]}
@@ -342,45 +339,28 @@ class LCSHubitatIntegration(MycroftSkill):
         request = self.access_hubitat("/apps/api/" + self.maker_api_app_id + "/devices/all")
         try:
             json_data = json.loads(request)
-        except:
+        except json.JSONDecodeError:
             self.log.debug("Error on json load")
-        count = 0
-        for device in json_data:
-            # For every device returned, record as a dict the id to use in a URL and the label to be spoken
-            # thisId = device.items()['id']
-            # thisLabel = device.items()['label']
-            # self.log.info("Id is "+str(thisId)+"label is "+thisLabel)
-            for k, v in device.items():
-                self.log.debug("attribute is " + str(k) + " value is " + str(v))
-                if k == 'id':
-                    this_id = v
-                elif k == 'label':
-                    this_label = v
-                    self.dev_commands_dict[this_label] = []
-                    self.dev_capabilities_dict[this_label] = None
-                elif k == 'commands':
-                    self.log.debug("Commands for " + this_label + " is=>" + str(v))
-                    for cmd in v:
-                        self.dev_commands_dict[this_label].append(cmd['command'])
-                elif k == 'capabilities':
-                    self.log.debug("capabilities for " + this_label + " is=>" + str(v))
-                    self.dev_capabilities_dict[this_label] = v
-            self.dev_id_dict[this_label] = this_id
-            self.log.debug(self.dev_commands_dict[this_label])
-            self.log.debug(self.dev_capabilities_dict[this_label])
-            count = count + 1
+            return
+
+        self.all_devices_dict = {device['id']: device for device in json_data}
+        self.dev_id_dict = {device['label']: device['id'] for device in json_data}
+
+        for k, v in self.all_devices_dict.items():
+            self.all_devices_dict[k]['commands'] = [command['command'] for command in v['commands']]
+
         self.name_dict_present = True
-        return count
+        return len(self.all_devices_dict)
 
     def access_hubitat(self, part_url):
         # This routine knows how to talk to the hubitat.  It builds the URL from
         # the know access type (http://) and the domain info or dotted quad in
         # self.address, followed by the command info passed in by the caller.
-        request = None
+
         url = "http://" + self.address + part_url
         try:
             request = requests.get(url, params=self.access_token, timeout=5)
-        except:
+        except requests.RequestException:
             # If the request throws an error, the address may have changed.  Try
             # 'hubitat.local' as a backup.
             try:
@@ -389,8 +369,8 @@ class LCSHubitatIntegration(MycroftSkill):
                 url = "http://" + self.address + part_url
                 self.log.debug("Fell back to hubitat.local which translated to " + self.address)
                 request = requests.get(url, params=self.access_token, timeout=10)
-            except:
-                self.log.debug("Got an error from requests")
+            except requests.RequestException as e:
+                self.log.debug("Got an error from requests: " + str(e))
                 self.speak_dialog('url.error')
+                raise e
         return request.text
-
