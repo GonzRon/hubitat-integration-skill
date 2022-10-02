@@ -127,6 +127,9 @@ class LCSHubitatIntegration(MycroftSkill):
                                 self.call_set_level(dev_id, level, "setCoolingSetpoint")
                             elif 'heat' in t_stat_mode:
                                 self.call_set_level(dev_id, level, "setHeatingSetpoint")
+                            elif 'auto' in t_stat_mode:
+                                self.call_set_level(dev_id, level, "setCoolingSetpoint")
+                                self.call_set_level(dev_id, level, "setHeatingSetpoint")
                             else:
                                 self.speak_dialog(str(device) + ' is currently set to ' + str(t_stat_mode), data={'device': device, 'level': level})
             elif self.is_command_available(dev_id, 'setLevel'):
@@ -180,12 +183,10 @@ class LCSHubitatIntegration(MycroftSkill):
         if self.configured:
             if not self.hub_devices_retrieved:
                 self.update_devices()
-            number = 0
             for label, dev_id in self.dev_id_dict.items():
                 # Speak the real devices, but not the test devices
                 if '**test' not in dev_id:
-                    number += 1
-                    self.speak_dialog('list.devices', data={'number': str(number), 'name': label, 'id': dev_id})
+                    self.speak_dialog('list.devices', data={'name': label, 'id': dev_id})
         else:
             self.not_configured()
 
@@ -297,9 +298,15 @@ class LCSHubitatIntegration(MycroftSkill):
             raise Exception("Unsupported Attribute")
 
     def hub_command_devices(self, dev_id, state, value=None):
+        """
+
+        :param value: str
+        :param state: str
+        :type dev_id: str
+        """
         # Build a URL to send the requested command to the Hubitat and
         # send it via "access_hubitat".  Some commands also have a value like "setlevel"
-        if dev_id[0:6] == "**test":
+        if dev_id.startswith("**test"):
             # This is used for regression tests only
             return
         url = "/apps/api/" + self.maker_api_app_id + "/devices/" + dev_id + "/" + state  # This URL is as specified in Hubitat maker app
@@ -313,10 +320,7 @@ class LCSHubitatIntegration(MycroftSkill):
 
     def get_device_attribute(self, dev_id, attr):
         self.log.debug("Looking for attr {}".format(attr))
-        # The json string from Hubitat turns into a dict.  The key attributes
-        # has a value of a list.  The list is a list of dicts with the attribute
-        # name, value, and other things that we don't care about.  So here when
-        # the device was a test device, we fake out the attributes for testing
+
         if dev_id == "**testAttr":
             tempList = [{'name': "testattr", "currentValue": 99}]
             jsn = {"attributes": tempList}
@@ -330,14 +334,11 @@ class LCSHubitatIntegration(MycroftSkill):
 
     def update_devices(self):
         # Init the device list and command list with tests
-        self.dev_commands_dict = {"testOnDev": ["on"], "testOnOffDev": ["on", "off"],
-                                  "testLevelDev": ["on", "off", "setLevel"]}
-        self.dev_id_dict = {"testOnDev": "**testOnOff", "testOnOffDev": "**testOnOff", "testLevelDev": "**testLevel",
-                            "testAttrDev": "**testAttr"}
+        self.dev_commands_dict = {"testOnDev": ["on"], "testOnOffDev": ["on", "off"], "testLevelDev": ["on", "off", "setLevel"]}
+        self.dev_id_dict = {"testOnDev": "**testOnOff", "testOnOffDev": "**testOnOff", "testLevelDev": "**testLevel", "testAttrDev": "**testAttr"}
         self.log.debug(self.access_token)
 
-        # Now get the actual devices from Hubitat and parse out the devices and their IDs and valid
-        # commands
+        # Now get the actual devices from Hubitat and parse out the devices and their IDs and valid commands
         request = self.access_hubitat("/apps/api/" + self.maker_api_app_id + "/devices/all")
         try:
             json_data = json.loads(request)
